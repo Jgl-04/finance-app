@@ -1,0 +1,32 @@
+{
+  "name": "Cuenta y Razón",
+  "short_name": "Cuenta y Razón",
+  "description": "App de control de finanzas personales: gastos, ingresos, deudas, metas de ahorro y presupuestos.",
+  "start_url": "./finanzas.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#EDE6D6",
+  "theme_color": "#A67C27",
+  "lang": "es",
+  "icons": [
+    {
+      "src": "icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "icon-512-maskable.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ]
+}
