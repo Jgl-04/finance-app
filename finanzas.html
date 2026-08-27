@@ -519,8 +519,10 @@ function getDebtLinkedGoalIds(){
 function getNetWorthEligibleSavings(){
   const excluded = getDebtLinkedGoalIds();
   let total = state.goals.filter(g=>!excluded.has(g.id)).reduce((s,g)=>s+Number(g.current||0),0);
+  const countedAccounts = new Set();
   state.goals.forEach(g=>{
-    if(!excluded.has(g.id) && g.linkedAccount && g.excludeFromBalance){
+    if(!excluded.has(g.id) && g.linkedAccount && g.excludeFromBalance && !countedAccounts.has(g.linkedAccount)){
+      countedAccounts.add(g.linkedAccount);
       total += getAccountBalance(g.linkedAccount);
     }
   });
@@ -753,7 +755,7 @@ function totals(){
     if(excludedAccounts.has(tx.account)) return;
     const amt = Number(tx.amount)||0;
     if(tx.type==='ingreso') balance += amt; else balance -= amt;
-    if(monthKey(tx.date)===now && !tx.isTransfer){
+    if(monthKey(tx.date)===now && !tx.isTransfer && !tx.isAdjustment){
       if(tx.type==='ingreso') monthIncome += amt; else monthExpense += amt;
     }
   });
@@ -798,7 +800,7 @@ function budget503020(){
   const now = todayISO().slice(0,7);
   const excludedAccounts = getBalanceExcludedAccounts();
   let income=0, necesidad=0, deseo=0;
-  state.transactions.filter(t=>monthKey(t.date)===now && !excludedAccounts.has(t.account) && !t.isTransfer).forEach(t=>{
+  state.transactions.filter(t=>monthKey(t.date)===now && !excludedAccounts.has(t.account) && !t.isTransfer && !t.isAdjustment).forEach(t=>{
     if(t.type==='ingreso'){ income += Number(t.amount||0); return; }
     const amt = Number(t.amount||0);
     const catType = getCategoryType(t.category);
@@ -818,7 +820,7 @@ function categoryBreakdown(){
   const now = todayISO().slice(0,7);
   const excludedAccounts = getBalanceExcludedAccounts();
   const map = {};
-  state.transactions.filter(t=>t.type==='gasto' && monthKey(t.date)===now && !excludedAccounts.has(t.account) && !t.isTransfer).forEach(t=>{
+  state.transactions.filter(t=>t.type==='gasto' && monthKey(t.date)===now && !excludedAccounts.has(t.account) && !t.isTransfer && !t.isAdjustment).forEach(t=>{
     map[t.category] = (map[t.category]||0) + Number(t.amount||0);
   });
   return map;
@@ -1230,11 +1232,11 @@ function viewResumen(){
     const trendLabels = trendMonths.map(d=>d.toLocaleDateString('es-ES',{month:'short'}));
     const trendIncome = trendMonths.map(d=>{
       const key = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
-      return state.transactions.filter(t=>t.type==='ingreso' && !trendExcludedAccounts.has(t.account) && !t.isTransfer && monthKey(t.date)===key).reduce((s,t)=>s+Number(t.amount||0),0);
+      return state.transactions.filter(t=>t.type==='ingreso' && !trendExcludedAccounts.has(t.account) && !t.isTransfer && !t.isAdjustment && monthKey(t.date)===key).reduce((s,t)=>s+Number(t.amount||0),0);
     });
     const trendExpense = trendMonths.map(d=>{
       const key = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
-      return state.transactions.filter(t=>t.type==='gasto' && !trendExcludedAccounts.has(t.account) && !t.isTransfer && monthKey(t.date)===key).reduce((s,t)=>s+Number(t.amount||0),0);
+      return state.transactions.filter(t=>t.type==='gasto' && !trendExcludedAccounts.has(t.account) && !t.isTransfer && !t.isAdjustment && monthKey(t.date)===key).reduce((s,t)=>s+Number(t.amount||0),0);
     });
     if(chartTrend) chartTrend.destroy();
     chartTrend = new Chart(trendCanvas, {
@@ -1261,7 +1263,13 @@ function viewResumen(){
     const avgExpense = getAverageMonthlyExpense();
     const savedTotal = getEmergencyFundSavedTotal();
     if(avgExpense<=0){
-      emCard.innerHTML = `<div style="font-size:12.5px;color:var(--ink-faint);">Registra algún gasto en los últimos meses para estimar tu fondo de emergencia recomendado.</div>`;
+      emCard.innerHTML = `
+        <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:6px;">
+          <span style="font-family:'IBM Plex Mono',monospace;font-size:11px;text-transform:uppercase;letter-spacing:0.06em;color:var(--ink-soft);">Ahorro en metas</span>
+        </div>
+        <div style="font-family:'Fraunces',serif;font-size:24px;font-weight:600;margin-bottom:6px;">${fmt(savedTotal)} €</div>
+        <div style="font-size:12px;color:var(--ink-faint);">Registra algún gasto en los últimos meses para calcular tu fondo de emergencia recomendado y ver tu progreso sobre él.</div>
+      `;
     } else {
       const min3 = avgExpense*3, max6 = avgExpense*6;
       const pct = Math.min(100, Math.round((savedTotal/max6)*100));
@@ -1523,7 +1531,13 @@ function openEmergencyFundDetailSheet(){
 
   let bodyHTML;
   if(avgExpense<=0){
-    bodyHTML = `<p style="font-size:12.5px;color:var(--ink-faint);">Registra algún gasto en los últimos meses para poder calcular tu fondo de emergencia recomendado.</p>`;
+    bodyHTML = `
+      <div class="card" style="padding:14px;margin-bottom:16px;">
+        <span style="font-family:'IBM Plex Mono',monospace;font-size:11px;text-transform:uppercase;letter-spacing:0.06em;color:var(--ink-soft);">Tu progreso</span>
+        <div style="font-family:'Fraunces',serif;font-size:26px;font-weight:600;margin-top:4px;">${fmt(savedTotal)} €</div>
+      </div>
+      <p style="font-size:12.5px;color:var(--ink-faint);">Registra algún gasto en los últimos meses para poder calcular tu fondo de emergencia recomendado.</p>
+    `;
   } else {
     const min3 = avgExpense*3, max6 = avgExpense*6;
     const pct = Math.min(100, Math.round((savedTotal/max6)*100));
@@ -1575,7 +1589,7 @@ function getAverageMonthlyExpense(){
   for(let i=0;i<3;i++){
     const d = new Date(now.getFullYear(), now.getMonth()-i, 1);
     const key = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
-    const total = state.transactions.filter(t=>t.type==='gasto' && monthKey(t.date)===key && !excludedAccounts.has(t.account) && !t.isTransfer && getCategoryType(t.category)!=='ahorro').reduce((s,t)=>s+Number(t.amount||0),0);
+    const total = state.transactions.filter(t=>t.type==='gasto' && monthKey(t.date)===key && !excludedAccounts.has(t.account) && !t.isTransfer && !t.isAdjustment && getCategoryType(t.category)!=='ahorro').reduce((s,t)=>s+Number(t.amount||0),0);
     monthsData.push(total);
   }
   const nonZero = monthsData.filter(m=>m>0);
@@ -2485,6 +2499,89 @@ function openSimuladorMenuSheet(){
   overlay.querySelector('#sim-compound').onclick = ()=>{ overlay.remove(); openCompoundSimSheet(); };
 }
 
+function openAccountsMoneySheet(){
+  const overlay = document.createElement('div');
+  overlay.className='overlay';
+  overlay.innerHTML = `
+    <div class="sheet">
+      <div class="sheet-handle"></div>
+      <h3>Cuentas</h3>
+      <p style="font-size:12px;color:var(--ink-faint);margin:0 0 14px;">El saldo de cada cuenta se calcula a partir de tus movimientos. Si no coincide con la realidad, puedes ajustarlo.</p>
+      <div id="accounts-money-list"></div>
+      <div class="sheet-actions" style="margin-top:16px;"><button class="btn-primary" id="accounts-money-close" style="flex:1;">Cerrar</button></div>
+    </div>
+  `;
+  document.getElementById('modal-root').appendChild(overlay);
+  overlay.onclick = (e)=>{ if(e.target===overlay){ overlay.remove(); render(); } };
+  overlay.querySelector('#accounts-money-close').onclick = ()=>{ overlay.remove(); render(); };
+  renderAccountsMoneyList(overlay.querySelector('#accounts-money-list'));
+}
+
+function renderAccountsMoneyList(wrap){
+  if(!wrap) return;
+  if(state.accounts.length===0){
+    wrap.innerHTML = `<div class="card"><div class="empty-block"><div class="big">Aún no tienes cuentas</div><div class="small">Añade alguna desde Finanzas → General.</div></div></div>`;
+    return;
+  }
+  const excluded = getBalanceExcludedAccounts();
+  wrap.innerHTML='';
+  state.accounts.forEach(acc=>{
+    const bal = getAccountBalance(acc);
+    const row = document.createElement('div');
+    row.className='card';
+    row.style.cssText = 'padding:14px;margin-bottom:10px;';
+    row.innerHTML = `
+      <div style="display:flex;justify-content:space-between;align-items:center;">
+        <div>
+          <div style="font-weight:600;font-size:14px;">${acc}${excluded.has(acc)? ' <span style="color:var(--ink-faint);font-size:10.5px;font-weight:400;">· fuera del balance total</span>' : ''}</div>
+          <div style="font-family:'IBM Plex Mono',monospace;font-size:16px;font-weight:600;margin-top:4px;">${fmt(bal)} €</div>
+        </div>
+        <button class="btn-secondary" data-adjust="${acc}">Ajustar saldo</button>
+      </div>
+    `;
+    row.querySelector('[data-adjust]').onclick = ()=> openAdjustBalanceSheet(acc, wrap);
+    wrap.appendChild(row);
+  });
+}
+
+function openAdjustBalanceSheet(accountName, parentWrap){
+  const currentBal = getAccountBalance(accountName);
+  const overlay = document.createElement('div');
+  overlay.className='overlay';
+  overlay.innerHTML = `
+    <div class="sheet">
+      <div class="sheet-handle"></div>
+      <h3>Ajustar saldo · ${accountName}</h3>
+      <p style="font-size:12px;color:var(--ink-faint);margin:0 0 14px;">Saldo calculado ahora mismo: <strong style="color:var(--ink);">${fmt(currentBal)} €</strong>. Indica el saldo real que tiene esta cuenta y la app añadirá un movimiento de ajuste con la diferencia.</p>
+      <div class="field"><label>Saldo real (€)</label><input type="text" inputmode="decimal" id="adj-balance" value="${fmt(currentBal)}"></div>
+      <div class="sheet-actions"><button class="btn-primary" id="adj-save" style="flex:1;">Ajustar</button></div>
+    </div>
+  `;
+  document.getElementById('modal-root').appendChild(overlay);
+  overlay.onclick = (e)=>{ if(e.target===overlay) overlay.remove(); };
+  attachAmountFormatting(overlay.querySelector('#adj-balance'));
+  overlay.querySelector('#adj-save').onclick = async ()=>{
+    const real = parseAmount(overlay.querySelector('#adj-balance').value);
+    if(real===null || isNaN(real)){ showToast('Introduce un saldo válido.'); return; }
+    const diff = Math.round((real - currentBal)*100)/100;
+    if(diff===0){ showToast('El saldo ya coincide, no hace falta ajustar.'); overlay.remove(); return; }
+    const type = diff>0 ? 'ingreso' : 'gasto';
+    const label = 'Ajuste de saldo';
+    if(type==='ingreso' && !state.incomeTypes.includes(label)) state.incomeTypes.push(label);
+    if(type==='gasto' && !state.categories.includes(label)) state.categories.push(label);
+    state.transactions.push({
+      id: uid(), type, account: accountName, amount: Math.abs(diff), date: todayISO(),
+      category: type==='gasto'? label : undefined,
+      incomeType: type==='ingreso'? label : undefined,
+      note: 'Ajuste manual de saldo', isAdjustment: true
+    });
+    await saveState();
+    overlay.remove();
+    showToast('Saldo ajustado.');
+    if(parentWrap) renderAccountsMoneyList(parentWrap);
+  };
+}
+
 function getUsefulSimData(){
   const t = totals();
   const excludedAccounts = getBalanceExcludedAccounts();
@@ -2918,12 +3015,24 @@ function viewMetas(){
 
 function promptAddToGoal(id){
   const g = state.goals.find(x=>x.id===id);
-  openAmountInputSheet(`Aportar a "${g.name}"`, '¿Cuánto quieres aportar?', async (n)=>{
-    g.current = Math.round((g.current + n)*100)/100;
-    g.contributionHistory = g.contributionHistory || [];
-    g.contributionHistory.push({date: todayISO(), amount: n});
-    await saveState(); render(); showToast('Aportación registrada.');
-  });
+  if(g.linkedAccount){
+    openAmountInputSheet(`Aportar a "${g.name}"`, `Se registrará como un ingreso en tu cuenta "${g.linkedAccount}".`, async (n)=>{
+      const label = 'Aportación a meta';
+      if(!state.incomeTypes.includes(label)) state.incomeTypes.push(label);
+      state.transactions.push({
+        id: uid(), type:'ingreso', account: g.linkedAccount, amount: n, date: todayISO(),
+        incomeType: label, note: `Aportación a meta: ${g.name}`
+      });
+      await saveState(); render(); showToast('Aportación registrada.');
+    });
+  } else {
+    openAmountInputSheet(`Aportar a "${g.name}"`, '¿Cuánto quieres aportar?', async (n)=>{
+      g.current = Math.round((g.current + n)*100)/100;
+      g.contributionHistory = g.contributionHistory || [];
+      g.contributionHistory.push({date: todayISO(), amount: n});
+      await saveState(); render(); showToast('Aportación registrada.');
+    });
+  }
 }
 function monthsBetween(startISO, endISO){
   const s = new Date(startISO+'T00:00:00'), e = new Date(endISO+'T00:00:00');
@@ -3291,11 +3400,20 @@ function viewAjustes(){
           <span style="color:var(--ink-faint);font-size:16px;">›</span>
         </div>
       </div>
-      <div class="card" id="menu-simular" style="padding:16px;cursor:pointer;">
+      <div class="card" id="menu-simular" style="padding:16px;margin-bottom:12px;cursor:pointer;">
         <div style="display:flex;justify-content:space-between;align-items:center;">
           <div>
             <div style="font-weight:600;font-size:15px;">Simular</div>
             <div style="font-size:12px;color:var(--ink-faint);margin-top:2px;">Coche, vivienda e interés compuesto, sin afectar a tus datos reales.</div>
+          </div>
+          <span style="color:var(--ink-faint);font-size:16px;">›</span>
+        </div>
+      </div>
+      <div class="card" id="menu-cuentas" style="padding:16px;cursor:pointer;">
+        <div style="display:flex;justify-content:space-between;align-items:center;">
+          <div>
+            <div style="font-weight:600;font-size:15px;">Cuentas</div>
+            <div style="font-size:12px;color:var(--ink-faint);margin-top:2px;">Consulta el saldo de cada cuenta y ajústalo si no coincide.</div>
           </div>
           <span style="color:var(--ink-faint);font-size:16px;">›</span>
         </div>
@@ -3307,6 +3425,7 @@ function viewAjustes(){
   root.querySelector('#menu-ajustes').onclick = ()=> openAjustesMenuSheet();
   root.querySelector('#menu-explicacion').onclick = ()=> openExplanationMenuSheet();
   root.querySelector('#menu-simular').onclick = ()=> openSimuladorMenuSheet();
+  root.querySelector('#menu-cuentas').onclick = ()=> openAccountsMoneySheet();
 }
 
 function openFinanzasMenuSheet(){
